@@ -1,0 +1,7 @@
+1234567												    //ID of the codingame.com account taken from the FAQ page
+password  												//Password of the codingame.com account
+chat.codingame.com 										//Host
+5222													//Port
+conference.codingame.com 								//MUC
+NeumaNN													//Nickname of the bot
+fr                                                      //Room to join
