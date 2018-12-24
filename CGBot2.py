@@ -1,13 +1,10 @@
 #!/usr/bin/env python3
-# Learn from username of speaker as well
-# Train_Bot() now only reads logs of a given channel
-# Checkpoint files now contain the name of the channel
-# seq_length->1000, BATCH_SIZE->64 -> Hoping for the bot to learn more context
-# Give error message if trying to load checkpoint files which don't exist
-# Load CuDNNGRU weights to CPU for inference: https://gist.github.com/bzamecnik/bd3786a074f8cb891bc2a397343070f1
-# Keras style checkpointing as CPU inference was not working with tensorflow checkpoints
-# Use CPU when Train==False
-# Renamed logs folder to be consistent with CGBot 1 and Magus' name
+# Got rid of find_nth
+# Got rid of np.uint8
+# Save vocab to disk, should prevent the model from breaking when someone uses a char the bot has never seen before
+# For training and inference, read log files in chronological order, should help initialise the state of the bot for inference
+# Initialisation_Length parameter for when the bot is booted. Determines how much of the logs are fed to it for initialisation
+# For inference intialisation, read only as many log files as necessary, should speed up booting
 import tensorflow as tf
 import numpy as np
 import os
@@ -30,6 +27,7 @@ rnn_units = 1024 # Number of RNN units
 Training_Proportion = 0.95
 load_checkpoint = True
 Train = False
+Initialisation_Length=1000
 Temperature = 0.25 # Low temperatures results in more predictable text. Higher temperatures results in more surprising text. Experiment to find the best setting.
 checkpoint_dir = './training_checkpoints' # Directory where the checkpoints will be saved
 logs_dir = './Logs'
@@ -54,7 +52,7 @@ def build_model(vocab_size, embedding_dim, batch_size):
   return model
 
 def loss(labels, logits):
-  return tf.keras.backend.sparse_categorical_crossentropy(labels, logits, from_logits=True)
+  return tf.keras.backend.sparse_categorical_crossentropy(labels,logits,from_logits=True)
 
 def Predictions_To_Id(predictions):
   predictions = tf.squeeze(predictions, 0) # remove the batch dimension
@@ -90,12 +88,6 @@ def generate_response(model,start_string,idx2char,char2idx): # Evaluation step (
       text_generated.append(char_generated)
   return ''.join(text_generated)
 
-def find_nth(string, substring, n): #https://stackoverflow.com/questions/1883980/find-the-nth-occurrence-of-substring-in-a-string
-   if (n == 1):
-       return string.find(substring)
-   else:
-       return string.find(substring, find_nth(string, substring, n - 1) + 1)
-
 def Filter_Logs(logs):
   timestamp = regex.compile(r'\(\d\d:\d\d:\d\d\)')
   All_lines=logs.split("\n")
@@ -104,7 +96,6 @@ def Filter_Logs(logs):
     if len(line)>0:
       match = timestamp.search(line)
       if match!=None and match.span()[0]==0:#Contains timestamp?
-        #Filtered_Logs+='\n'+line[find_nth(line,':',3)+2:]
         first_parenthesis=line.find(')')
         username_colon=line.find(':',first_parenthesis)
         Filtered_Logs+='\n'+line[first_parenthesis+2:username_colon-1]+':'+line[username_colon+2:]
@@ -113,23 +104,13 @@ def Filter_Logs(logs):
   return Filtered_Logs
 
 class ChannelBot(ClientXMPP):
-    nickname=""
-    room_name=""
-    MUC=""
     def __init__(self, jid, password,nick,room,MUC_name):
       ClientXMPP.__init__(self, jid, password)
       self.nickname=nick
       self.room_name=room
       self.MUC=MUC_name
 
-      text=""
-      logfile = regex.compile(regex.escape(self.room_name)+r'@'+regex.escape(MUC)+r'-\d\d\d\d-\d\d-\d\d\.log')
-      for file in os.listdir(logs_dir):
-        match = logfile.search(file)
-        if match!=None and match.span()[0]==0:
-          text+=open(logs_dir+'/'+file).read()
-      text=Filter_Logs(text)
-      vocab = sorted(set(text)) # The unique characters in the file
+      vocab = np.load(checkpoint_dir+'/vocab_'+self.room_name+'.npy') # The unique characters in the file
       self.vocab_size = len(vocab) # Length of the vocabulary in chars
       # Creating a mapping from unique characters to indices
       self.char2idx = {u:i for i, u in enumerate(vocab)}
@@ -143,7 +124,16 @@ class ChannelBot(ClientXMPP):
         print("Could not find checkpoint file: "+checkpoint_file)
         exit()
       self.model.build(tf.TensorShape([1, None]))
-      text = text[len(text)-1000:]
+      text=""
+      logfile = regex.compile(regex.escape(self.room_name)+r'@'+regex.escape(MUC)+r'-\d\d\d\d-\d\d-\d\d\.log')
+      for file in sorted(os.listdir(logs_dir),reverse=True):
+        print("Parsing "+file+" for inference initialisation")
+        match = logfile.search(file)
+        if match!=None and match.span()[0]==0:
+          text=open(logs_dir+'/'+file).read()+text
+          if len(text)>=Initialisation_Length:
+            break
+      text = text[len(text)-Initialisation_Length:]
       Feed_Model(self.model,text,self.char2idx)#Give the model some state
 
       self.register_plugin('xep_0045')
@@ -176,7 +166,7 @@ class ChannelBot(ClientXMPP):
 def Train_Bot(channel_name,MUC):
   text=""
   logfile = regex.compile(regex.escape(channel_name)+r'@'+regex.escape(MUC)+r'-\d\d\d\d-\d\d-\d\d\.log')
-  for file in os.listdir(logs_dir):
+  for file in sorted(os.listdir(logs_dir)):
     match = logfile.search(file)
     if match!=None and match.span()[0]==0:
       text+=open(logs_dir+'/'+file).read()
@@ -185,13 +175,14 @@ def Train_Bot(channel_name,MUC):
     exit()
   text=Filter_Logs(text)
   #print(text)
-  vocab = sorted(set(text)) # The unique characters in the file
+  vocab = np.array(sorted(set(text))) # The unique characters in the file
+  np.save(checkpoint_dir+'/vocab_'+channel_name,vocab)
   vocab_size = len(vocab) # Length of the vocabulary in chars
   # Creating a mapping from unique characters to indices
   char2idx = {u:i for i, u in enumerate(vocab)}
   idx2char = np.array(vocab)
 
-  text_as_int = np.array([char2idx[c] for c in text],dtype=np.uint8)
+  text_as_int = np.array([char2idx[c] for c in text])
   training_cutoff=round(len(text_as_int)*Training_Proportion)
   train_text = text_as_int[:training_cutoff]
   validation_text = text_as_int[training_cutoff:]
@@ -213,9 +204,7 @@ def Train_Bot(channel_name,MUC):
   checkpoint_file = checkpoint_dir+"/weights_"+channel_name+".h5"
   if load_checkpoint and os.path.isfile(checkpoint_file):
     model.load_weights(checkpoint_file)
-    #model.save_weights('weights_cudnn.h5')
     print("Restarting training from previous checkpoint")
-    #model.build(tf.TensorShape([BATCH_SIZE, None]))
   else:
     print("Training from random weights")
   model.summary()
