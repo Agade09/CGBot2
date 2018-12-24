@@ -1,6 +1,6 @@
-*
+/*
 !README.md
 !Config.txt.sample
 !CGBot2.py
 !.gitignore
-!training_checkpoints/weights_fr.h5
+!training_checkpoints/
