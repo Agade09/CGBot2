@@ -4,3 +4,6 @@
 !CGBot2.py
 !.gitignore
 !training_checkpoints/
+
+training_checkpoints/*
+!training_checkpoints/weights_fr.h5
