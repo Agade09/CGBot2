@@ -1,10 +1,6 @@
 #!/usr/bin/env python3
-# Got rid of find_nth
-# Got rid of np.uint8
-# Save vocab to disk, should prevent the model from breaking when someone uses a char the bot has never seen before
-# For training and inference, read log files in chronological order, should help initialise the state of the bot for inference
-# Initialisation_Length parameter for when the bot is booted. Determines how much of the logs are fed to it for initialisation
-# For inference intialisation, read only as many log files as necessary, should speed up booting
+# String_To_Int_Vector() function
+# String_To_Int_Vector() now handles characters which are not in the vocab by assigning them the value of the last element in the vocab
 import tensorflow as tf
 import numpy as np
 import os
@@ -26,7 +22,7 @@ embedding_dim = 256 # The embedding dimension
 rnn_units = 1024 # Number of RNN units
 Training_Proportion = 0.95
 load_checkpoint = True
-Train = False
+Train = True
 Initialisation_Length=1000
 Temperature = 0.25 # Low temperatures results in more predictable text. Higher temperatures results in more surprising text. Experiment to find the best setting.
 checkpoint_dir = './training_checkpoints' # Directory where the checkpoints will be saved
@@ -64,15 +60,18 @@ def Predictions_To_Id(predictions):
 def Predictions_To_Char(predictions,idx2char):
   return idx2char[Predictions_To_Id(predictions)]
 
+def String_To_Int_Vector(string,char2idx):
+  return [(char2idx[c] if (c in char2idx) else len(char2idx)-1) for c in string]
+
 def Feed_Model(model,message,char2idx):
-  msg_input = [char2idx[c] for c in message]
+  msg_input = String_To_Int_Vector(message,char2idx)
   msg_input = tf.expand_dims(msg_input, 0)
   predictions = model(msg_input)
   return predictions
 
 def generate_response(model,start_string,idx2char,char2idx): # Evaluation step (generating text using the learned model)
   num_generate = 100 # Max Number of characters to generate
-  input_eval = [char2idx[c] for c in start_string] # Converting our start string to numbers (vectorizing) 
+  input_eval = String_To_Int_Vector(start_string,char2idx)
   input_eval = tf.expand_dims(input_eval, 0)
   text_generated = []
   for i in range(num_generate):
@@ -182,7 +181,8 @@ def Train_Bot(channel_name,MUC):
   char2idx = {u:i for i, u in enumerate(vocab)}
   idx2char = np.array(vocab)
 
-  text_as_int = np.array([char2idx[c] for c in text])
+
+  text_as_int = np.array(String_To_Int_Vector(text,char2idx))
   training_cutoff=round(len(text_as_int)*Training_Proportion)
   train_text = text_as_int[:training_cutoff]
   validation_text = text_as_int[training_cutoff:]
