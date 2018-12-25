@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Limit covab size to most frequent characters
+# Restored cast to uint8, seems useful for performance
 import tensorflow as tf
 import numpy as np
 import os
@@ -9,6 +11,7 @@ from slixmpp import ClientXMPP
 import datetime
 import os
 import functools
+from collections import Counter
 
 tf.enable_eager_execution()
 
@@ -23,6 +26,7 @@ load_checkpoint = True
 Train = False
 Log_Messages=True
 Initialisation_Length=1000
+Vocab_Limit=256
 Temperature = 0.25 # Low temperatures results in more predictable text. Higher temperatures results in more surprising text. Experiment to find the best setting.
 checkpoint_dir = './training_checkpoints' # Directory where the checkpoints will be saved
 logs_dir = './Logs'
@@ -60,7 +64,7 @@ def Predictions_To_Char(predictions,idx2char):
   return idx2char[Predictions_To_Id(predictions)]
 
 def String_To_Int_Vector(string,char2idx):
-  return [(char2idx[c] if (c in char2idx) else len(char2idx)-1) for c in string]
+  return np.array([(char2idx[c] if (c in char2idx) else len(char2idx)-1) for c in string],dtype=np.uint8)
 
 def Feed_Model(model,message,char2idx):
   msg_input = String_To_Int_Vector(message,char2idx)
@@ -86,7 +90,7 @@ def generate_response(model,start_string,idx2char,char2idx): # Evaluation step (
       text_generated.append(char_generated)
   return ''.join(text_generated)
 
-def Filter_Logs(logs): #Logs didn't seem to contain '\r'
+def Filter_Logs(logs):
   timestamp = regex.compile(r'\(\d\d:\d\d:\d\d\)')
   All_lines=logs.split("\n")
   Filtered_Logs=""
@@ -191,13 +195,17 @@ def Train_Bot(channel_name,MUC):
     exit()
   text=Filter_Logs(text)
   #print(text)
-  vocab = np.array(sorted(set(text))) # The unique characters in the file
+  #vocab = np.array(sorted(set(text))) # The unique characters in the file
+  vocab = Counter(text)
+  vocab = sorted(vocab, key=vocab.get, reverse=True)
+  vocab = np.array(vocab[:Vocab_Limit])
+  #print(Counter(text))
+  #print(vocab)
   np.save(checkpoint_dir+'/vocab_'+channel_name,vocab)
   vocab_size = len(vocab) # Length of the vocabulary in chars
   # Creating a mapping from unique characters to indices
   char2idx = {u:i for i, u in enumerate(vocab)}
   idx2char = np.array(vocab)
-
 
   text_as_int = np.array(String_To_Int_Vector(text,char2idx))
   training_cutoff=round(len(text_as_int)*Training_Proportion)
