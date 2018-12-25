@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-# String_To_Int_Vector() function
-# String_To_Int_Vector() now handles characters which are not in the vocab by assigning them the value of the last element in the vocab
+# Log messages
+# Close config file
+# Got rid of all msg['mucnick'] -> msg.get_mucnick()
 import tensorflow as tf
 import numpy as np
 import os
@@ -23,6 +24,7 @@ rnn_units = 1024 # Number of RNN units
 Training_Proportion = 0.95
 load_checkpoint = True
 Train = True
+Log_Messages=True
 Initialisation_Length=1000
 Temperature = 0.25 # Low temperatures results in more predictable text. Higher temperatures results in more surprising text. Experiment to find the best setting.
 checkpoint_dir = './training_checkpoints' # Directory where the checkpoints will be saved
@@ -102,6 +104,18 @@ def Filter_Logs(logs):
         Filtered_Logs+=' '+line
   return Filtered_Logs
 
+def Log_Message(msg):
+  if Log_Messages:
+    log_filename=msg['from'].bare+'-'+datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d')+'.log'
+    print(log_filename)
+    log_file=open(logs_dir+'/'+log_filename,'a+')
+    regex.sub(r"\r\n"," ",msg['body']) # Get rid of newlines and carriage returns
+    if msg.get_mucnick()!='':
+      log_file.write(datetime.datetime.fromtimestamp(time.time()).strftime('(%H:%M:%S)')+' '+msg.get_mucnick()+' : '+msg['body'])
+    else:
+      print("msg.get_mucnick() returned ''")
+      print(msg)
+
 class ChannelBot(ClientXMPP):
     def __init__(self, jid, password,nick,room,MUC_name):
       ClientXMPP.__init__(self, jid, password)
@@ -151,9 +165,10 @@ class ChannelBot(ClientXMPP):
           msg.reply("Thanks for sending\n%(body)s" % msg).send()
 
     def muc_message(self,msg):
-      print(msg['mucnick']+':'+msg['body'])
-      Feed_Model(self.model,msg['mucnick']+':'+msg['body'],self.char2idx)
-      if msg['mucnick']!=self.nickname and self.nickname.lower() in msg['body'].lower():
+      print(msg.get_mucnick()+':'+msg['body'])
+      Log_Message(msg)
+      Feed_Model(self.model,msg.get_mucnick()+':'+msg['body'],self.char2idx)
+      if msg.get_mucnick()!=self.nickname and self.nickname.lower() in msg['body'].lower():
         print("Saw my nickname")
         #print(self.room_name+"@"+self.MUC+"/"+datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S'))
         reply=self.make_message(mto=msg['from'].bare,mbody=generate_response(self.model,'\n'+self.nickname+':',self.idx2char,self.char2idx),mtype='groupchat')
@@ -236,6 +251,7 @@ Chat_port= config_file.readline().split()[0]
 MUC = config_file.readline().split()[0]
 Nickname = config_file.readline().split()[0]
 Channel = config_file.readline().split()[0]
+config_file.close()
 
 if Train:
   Train_Bot(Channel,MUC)
