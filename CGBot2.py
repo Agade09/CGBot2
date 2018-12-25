@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 # Limit covab size to most frequent characters
 # Restored cast to uint8, seems useful for performance
+# Time response generation
+# Simplified '\n' logic in muc_message()
+# Respond properly to private messages
 import tensorflow as tf
 import numpy as np
 import os
@@ -73,6 +76,7 @@ def Feed_Model(model,message,char2idx):
   return predictions
 
 def generate_response(model,start_string,idx2char,char2idx): # Evaluation step (generating text using the learned model)
+  start = time.time()
   num_generate = 100 # Max Number of characters to generate
   input_eval = String_To_Int_Vector(start_string,char2idx)
   input_eval = tf.expand_dims(input_eval, 0)
@@ -86,6 +90,7 @@ def generate_response(model,start_string,idx2char,char2idx): # Evaluation step (
       char_generated = idx2char[predicted_id]
       if char_generated=='\n': #Not working for some reason
         Feed_Model(model,'\n',char2idx)
+        print("Took "+str(time.time()-start)+" to generate a response")
         break
       text_generated.append(char_generated)
   return ''.join(text_generated)
@@ -108,7 +113,6 @@ def Filter_Logs(logs):
 def Log_Message(msg):
   if Log_Messages:
     log_filename=msg['from'].bare+'-'+datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d')+'.log'
-    print(log_filename)
     log_file=open(logs_dir+'/'+log_filename,'a+')
     regex.sub(r"\r\n"," ",msg['body']) # Get rid of newlines and carriage returns
     if msg.get_mucnick()!='':
@@ -118,42 +122,46 @@ def Log_Message(msg):
       print(msg)
 
 class ChannelBot(ClientXMPP):
-    def __init__(self, jid, password,nick,room,MUC_name):
+    def __init__(self, jid, password,nick,rooms,MUC_name):
       ClientXMPP.__init__(self, jid, password)
       self.nickname=nick
-      self.room_name=room
+      self.room_names=rooms
       self.MUC=MUC_name
 
-      vocab_filepath = checkpoint_dir+'/vocab_'+self.room_name+'.npy'
-      if os.path.isfile(vocab_filepath):
-        vocab = np.load(vocab_filepath) # The unique characters in the file
-      else:
-        print("Could not find vocab file at: "+vocab_filepath)
-        exit()
-      self.vocab_size = len(vocab) # Length of the vocabulary in chars
-      # Creating a mapping from unique characters to indices
-      self.char2idx = {u:i for i, u in enumerate(vocab)}
-      self.idx2char = np.array(vocab)
+      self.model = {}
+      self.char2idx={}
+      self.idx2char={}
+      for room_name in self.room_names:
+        vocab_filepath = checkpoint_dir+'/vocab_'+room_name+'.npy'
+        if os.path.isfile(vocab_filepath):
+          vocab = np.load(vocab_filepath) # The unique characters in the file
+        else:
+          print("Could not find vocab file at: "+vocab_filepath)
+          exit()
+        vocab_size = len(vocab) # Length of the vocabulary in chars
+        # Creating a mapping from unique characters to indices
+        self.char2idx[room_name] = {u:i for i, u in enumerate(vocab)}
+        self.idx2char[room_name] = np.array(vocab)
 
-      self.model = build_model(self.vocab_size,embedding_dim,batch_size=1)
-      checkpoint_file = checkpoint_dir+"/weights_"+self.room_name+".h5"
-      if os.path.isfile(checkpoint_file):
-        self.model.load_weights(checkpoint_file)
-      else:
-        print("Could not find checkpoint file: "+checkpoint_file)
-        exit()
-      self.model.build(tf.TensorShape([1, None]))
-      text=""
-      logfile = regex.compile(regex.escape(self.room_name)+r'@'+regex.escape(MUC)+r'-\d\d\d\d-\d\d-\d\d\.log')
-      for file in sorted(os.listdir(logs_dir),reverse=True):
-        match = logfile.search(file)
-        if match!=None and match.span()[0]==0:
-          print("Parsing "+file+" for inference initialisation")
-          text=open(logs_dir+'/'+file).read()+text
-          if len(text)>=Initialisation_Length:
-            break
-      text = text[len(text)-Initialisation_Length:]
-      Feed_Model(self.model,text,self.char2idx)#Give the model some state
+        self.model[room_name] = build_model(vocab_size,embedding_dim,batch_size=1)
+        checkpoint_file = checkpoint_dir+"/weights_"+room_name+".h5"
+        if os.path.isfile(checkpoint_file):
+          self.model[room_name].load_weights(checkpoint_file)
+        else:
+          print("Could not find checkpoint file: "+checkpoint_file)
+          exit()
+        self.model[room_name].build(tf.TensorShape([1, None]))
+        text=""
+        logfile = regex.compile(regex.escape(room_name)+r'@'+regex.escape(MUC)+r'-\d\d\d\d-\d\d-\d\d\.log')
+        for file in sorted(os.listdir(logs_dir),reverse=True):
+          match = logfile.search(file)
+          if match!=None and match.span()[0]==0:
+            print("Parsing "+file+" for inference initialisation")
+            text=open(logs_dir+'/'+file).read()+text
+            if len(text)>=Initialisation_Length:
+              break
+        text = text[len(text)-Initialisation_Length:]
+        Feed_Model(self.model[room_name],text,self.char2idx[room_name])#Give the model some state
 
       self.register_plugin('xep_0045')
       self.add_event_handler("session_start", self.session_start)
@@ -163,25 +171,29 @@ class ChannelBot(ClientXMPP):
     def session_start(self, event):
       self.send_presence()
       self.get_roster()
-      self.plugin['xep_0045'].join_muc(self.room_name+'@'+self.MUC,self.nickname,wait=True)
+      for room_name in self.room_names:
+        self.plugin['xep_0045'].join_muc(room_name+'@'+self.MUC,self.nickname,wait=True)
       print("Session started")
 
     def message(self, msg): #Private message?
       if msg['type'] in ('chat', 'normal'):
-          msg.reply("Thanks for sending\n%(body)s" % msg).send()
+        first_room=self.room_names[0]
+        reply=self.make_message(mto=msg['from'].bare,mbody=generate_response(self.model[first_room],self.nickname+':',self.idx2char[first_room],self.char2idx[first_room]))
+        reply['id']=first_room+"_"+self.nickname+"@"+self.MUC+"/"+datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')
+        reply.send()
 
     def muc_message(self,msg):
+      room_name=msg['from'].bare
+      room_name=room_name[:room_name.find('@')]
+      print(room_name)
       print(msg.get_mucnick()+':'+msg['body'])
       Log_Message(msg)
-      Feed_Model(self.model,msg.get_mucnick()+':'+msg['body'],self.char2idx)
+      Feed_Model(self.model[room_name],msg.get_mucnick()+':'+msg['body']+'\n',self.char2idx[room_name])
       if msg.get_mucnick()!=self.nickname and self.nickname.lower() in msg['body'].lower():
         print("Saw my nickname")
-        #print(self.room_name+"@"+self.MUC+"/"+datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S'))
-        reply=self.make_message(mto=msg['from'].bare,mbody=generate_response(self.model,'\n'+self.nickname+':',self.idx2char,self.char2idx),mtype='groupchat')
-        reply['id']=self.room_name+"_"+self.nickname+"@"+self.MUC+"/"+datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')
+        reply=self.make_message(mto=msg['from'].bare,mbody=generate_response(self.model[room_name],self.nickname+':',self.idx2char[room_name],self.char2idx[room_name]),mtype='groupchat')
+        reply['id']=room_name+"_"+self.nickname+"@"+self.MUC+"/"+datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')
         reply.send()
-      else:
-        Feed_Model(self.model,'\n',self.char2idx)
 
 def Train_Bot(channel_name,MUC):
   text=""
@@ -260,12 +272,13 @@ Chat_host = config_file.readline().split()[0]
 Chat_port= config_file.readline().split()[0]
 MUC = config_file.readline().split()[0]
 Nickname = config_file.readline().split()[0]
-Channel = config_file.readline().split()[0]
+Channel_line=config_file.readline()
+Channels = Channel_line[:Channel_line.find("//")].split()
 config_file.close()
 
 if Train:
   Train_Bot(Channel,MUC)
 else:
-  Bot = ChannelBot(CG_ID+'@'+Chat_host,CG_password,Nickname,Channel,MUC)
+  Bot = ChannelBot(CG_ID+'@'+Chat_host,CG_password,Nickname,Channels,MUC)
   Bot.connect()
   Bot.process()
