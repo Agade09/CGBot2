@@ -1,7 +1,4 @@
 #!/usr/bin/env python3
-# Log messages
-# Close config file
-# Got rid of all msg['mucnick'] -> msg.get_mucnick()
 import tensorflow as tf
 import numpy as np
 import os
@@ -89,7 +86,7 @@ def generate_response(model,start_string,idx2char,char2idx): # Evaluation step (
       text_generated.append(char_generated)
   return ''.join(text_generated)
 
-def Filter_Logs(logs):
+def Filter_Logs(logs): #Logs didn't seem to contain '\r'
   timestamp = regex.compile(r'\(\d\d:\d\d:\d\d\)')
   All_lines=logs.split("\n")
   Filtered_Logs=""
@@ -123,7 +120,12 @@ class ChannelBot(ClientXMPP):
       self.room_name=room
       self.MUC=MUC_name
 
-      vocab = np.load(checkpoint_dir+'/vocab_'+self.room_name+'.npy') # The unique characters in the file
+      vocab_filepath = checkpoint_dir+'/vocab_'+self.room_name+'.npy'
+      if os.path.isfile(vocab_filepath):
+        vocab = np.load() # The unique characters in the file
+      else:
+        print("Could not find vocab file at: "+vocab_filepath)
+        exit()
       self.vocab_size = len(vocab) # Length of the vocabulary in chars
       # Creating a mapping from unique characters to indices
       self.char2idx = {u:i for i, u in enumerate(vocab)}
