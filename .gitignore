@@ -3,4 +3,11 @@
 !Config.txt.sample
 !CGBot2.py
 !.gitignore
+!training_checkpoints/
+
+training_checkpoints/*
+!training_checkpoints/weights_fr.h5
+!training_checkpoints/vocab_fr.npy
+!training_checkpoints/weights_world.h5
+!training_checkpoints/vocab_world.npy
 !.gitattributes
