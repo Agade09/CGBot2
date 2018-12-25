@@ -122,7 +122,7 @@ class ChannelBot(ClientXMPP):
 
       vocab_filepath = checkpoint_dir+'/vocab_'+self.room_name+'.npy'
       if os.path.isfile(vocab_filepath):
-        vocab = np.load() # The unique characters in the file
+        vocab = np.load(vocab_filepath) # The unique characters in the file
       else:
         print("Could not find vocab file at: "+vocab_filepath)
         exit()
