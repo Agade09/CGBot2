@@ -20,7 +20,7 @@ embedding_dim = 256 # The embedding dimension
 rnn_units = 1024 # Number of RNN units
 Training_Proportion = 0.95
 load_checkpoint = True
-Train = True
+Train = False
 Log_Messages=True
 Initialisation_Length=1000
 Temperature = 0.25 # Low temperatures results in more predictable text. Higher temperatures results in more surprising text. Experiment to find the best setting.
@@ -142,9 +142,9 @@ class ChannelBot(ClientXMPP):
       text=""
       logfile = regex.compile(regex.escape(self.room_name)+r'@'+regex.escape(MUC)+r'-\d\d\d\d-\d\d-\d\d\.log')
       for file in sorted(os.listdir(logs_dir),reverse=True):
-        print("Parsing "+file+" for inference initialisation")
         match = logfile.search(file)
         if match!=None and match.span()[0]==0:
+          print("Parsing "+file+" for inference initialisation")
           text=open(logs_dir+'/'+file).read()+text
           if len(text)>=Initialisation_Length:
             break
