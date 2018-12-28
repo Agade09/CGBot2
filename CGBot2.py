@@ -1,9 +1,4 @@
 #!/usr/bin/env python3
-# Limit covab size to most frequent characters
-# Restored cast to uint8, seems useful for performance
-# Time response generation
-# Simplified '\n' logic in muc_message()
-# Respond properly to private messages
 import tensorflow as tf
 import numpy as np
 import os
@@ -15,6 +10,7 @@ import datetime
 import os
 import functools
 from collections import Counter
+from nltk.translate.bleu_score import sentence_bleu
 
 tf.enable_eager_execution()
 
@@ -28,6 +24,7 @@ Training_Proportion = 0.95
 load_checkpoint = True
 Train = False
 Log_Messages=True
+Test=False
 Initialisation_Length=1000
 Vocab_Limit=256
 Temperature = 0.25 # Low temperatures results in more predictable text. Higher temperatures results in more surprising text. Experiment to find the best setting.
@@ -116,7 +113,7 @@ def Log_Message(msg):
     log_file=open(logs_dir+'/'+log_filename,'a+')
     regex.sub(r"\r\n"," ",msg['body']) # Get rid of newlines and carriage returns
     if msg.get_mucnick()!='':
-      log_file.write(datetime.datetime.fromtimestamp(time.time()).strftime('(%H:%M:%S)')+' '+msg.get_mucnick()+' : '+msg['body'])
+      log_file.write(datetime.datetime.fromtimestamp(time.time()).strftime('(%H:%M:%S)')+' '+msg.get_mucnick()+' : '+msg['body']+'\n')
     else:
       print("msg.get_mucnick() returned ''")
       print(msg)
@@ -162,7 +159,9 @@ class ChannelBot(ClientXMPP):
               break
         text = text[len(text)-Initialisation_Length:]
         Feed_Model(self.model[room_name],text,self.char2idx[room_name])#Give the model some state
-
+      if Test:
+        first_room=self.room_names[0]
+        Test_Bot(self.model[first_room],self.idx2char[first_room],self.char2idx[first_room])
       self.register_plugin('xep_0045')
       self.add_event_handler("session_start", self.session_start)
       self.add_event_handler("message", self.message)
@@ -219,20 +218,41 @@ def Train_Bot(channel_name,MUC):
   char2idx = {u:i for i, u in enumerate(vocab)}
   idx2char = np.array(vocab)
 
-  text_as_int = np.array(String_To_Int_Vector(text,char2idx))
+  text=text.split('\n')
+  def Pad(string):
+    if len(string)>seq_length:
+      return string[:seq_length]
+    else:
+      return string.ljust(seq_length) #pad with spaces
+  def Sample(text_by_line):
+    text_samples=[]
+    i=0
+    while i<len(text_by_line):
+      #print(str(i)+"\\"+str(len(text_by_line)))
+      sample=""
+      while i<len(text_by_line) and len(sample)+len(text_by_line[i])+1<=seq_length: #How to deal with a really long line?
+        sample+=text_by_line[i]+'\n'
+        i+=1
+      text_samples.append(Pad(sample))
+    return text_samples
+  text = Sample(text)
+  text_as_int = [String_To_Int_Vector(s,char2idx) for s in text]
+  #text_as_int = [[text_as_int[i],text_as_int[i+1]] for i in range(len(text_as_int)-1)]
+  #print(text_as_int)
   training_cutoff=round(len(text_as_int)*Training_Proportion)
   train_text = text_as_int[:training_cutoff]
+  #print(train_text)
   validation_text = text_as_int[training_cutoff:]
 
   # Create training examples / targets
   dataset = tf.data.Dataset.from_tensor_slices(train_text)
-  dataset = dataset.batch(seq_length+1,drop_remainder=True)
+  #dataset = dataset.batch(seq_length+1,drop_remainder=True)
   dataset = dataset.apply(tf.data.experimental.shuffle_and_repeat(BUFFER_SIZE))
   dataset = dataset.apply(tf.data.experimental.map_and_batch(batch_size=BATCH_SIZE,drop_remainder=True,map_func=split_input_target))
   #dataset = dataset.prefetch(tf.contrib.data.AUTOTUNE)
 
   validation_dataset = tf.data.Dataset.from_tensor_slices(validation_text)
-  validation_dataset = validation_dataset.batch(seq_length+1,drop_remainder=True)
+  #validation_dataset = validation_dataset.batch(seq_length+1,drop_remainder=True)
   validation_dataset = validation_dataset.apply(tf.data.experimental.map_and_batch(batch_size=BATCH_SIZE,drop_remainder=True,map_func=split_input_target))
   validation_dataset = validation_dataset.repeat()
   #validation_dataset = validation_dataset.prefetch(tf.contrib.data.AUTOTUNE)
@@ -249,10 +269,8 @@ def Train_Bot(channel_name,MUC):
   checkpoint_prefix = checkpoint_dir+"/weights_"+channel_name+".h5"# Name of the checkpoint files
   checkpoint_callback=tf.keras.callbacks.ModelCheckpoint(filepath=checkpoint_prefix,save_weights_only=True,save_best_only=True,monitor='val_loss')
 
-  examples_per_training_epoch = len(train_text)//seq_length
-  steps_per_training_epoch = examples_per_training_epoch//BATCH_SIZE
-  examples_per_validation_epoch = len(validation_text)//seq_length
-  steps_per_validation_epoch = examples_per_validation_epoch//BATCH_SIZE
+  steps_per_training_epoch = len(train_text)//BATCH_SIZE
+  steps_per_validation_epoch = len(validation_text)//BATCH_SIZE
   training_history = model.fit(dataset, epochs=EPOCHS, steps_per_epoch=steps_per_training_epoch, callbacks=[checkpoint_callback], validation_steps=steps_per_validation_epoch,validation_data=validation_dataset)
 
   # summarize history for loss
@@ -264,6 +282,15 @@ def Train_Bot(channel_name,MUC):
   plt.legend(['train', 'test'], loc='upper left')
   plt.savefig('loss.png')
   plt.gcf().clear()
+
+def Test_Bot(model,idx2char,char2idx):
+  Phrases = ["Agade:Salut tout le monde","Agade:J'ai un probleme sur temperatures"]
+  for phrase in Phrases:
+    for i in range(10):
+      Feed_Model(model,phrase,char2idx)
+      response = generate_response(model,"NeumaNN: ",idx2char,char2idx)
+      print("Phrase: "+phrase)
+      print(response)
 
 config_file = open(config_filename,"r")
 CG_ID = config_file.readline().split()[0]
@@ -277,7 +304,7 @@ Channels = Channel_line[:Channel_line.find("//")].split()
 config_file.close()
 
 if Train:
-  Train_Bot(Channel,MUC)
+  Train_Bot(Channels[0],MUC)
 else:
   Bot = ChannelBot(CG_ID+'@'+Chat_host,CG_password,Nickname,Channels,MUC)
   Bot.connect()
