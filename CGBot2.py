@@ -15,7 +15,7 @@ from nltk.translate.bleu_score import sentence_bleu
 tf.enable_eager_execution()
 
 seq_length = 1000 # The maximum length sentence we want for a single input in characters
-BATCH_SIZE = 64
+BATCH_SIZE = 2
 BUFFER_SIZE = 10000
 EPOCHS=100
 embedding_dim = 256 # The embedding dimension 
