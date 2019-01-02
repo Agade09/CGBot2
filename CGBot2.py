@@ -11,8 +11,6 @@ import os
 import functools
 from collections import Counter
 
-tf.enable_eager_execution()
-
 seq_length = 1000 # The maximum length sentence we want for a single input in characters
 BATCH_SIZE = 2
 BUFFER_SIZE = 10000
@@ -30,6 +28,9 @@ Temperature = 0.25 # Low temperatures results in more predictable text. Higher t
 checkpoint_dir = './training_checkpoints' # Directory where the checkpoints will be saved
 logs_dir = './Logs'
 config_filename = 'Config.txt'
+
+if not Train:
+  tf.enable_eager_execution()
 
 def split_input_target(chunk):
     input_text = chunk[:-1]
@@ -235,7 +236,7 @@ def Train_Bot(channel_name,MUC):
       text_samples.append(Pad(sample))
     return text_samples
   text = Sample(text)
-  text_as_int = [String_To_Int_Vector(s,char2idx) for s in text]
+  text_as_int = np.array([String_To_Int_Vector(s,char2idx) for s in text])
   #text_as_int = [[text_as_int[i],text_as_int[i+1]] for i in range(len(text_as_int)-1)]
   #print(text_as_int)
   training_cutoff=round(len(text_as_int)*Training_Proportion)
