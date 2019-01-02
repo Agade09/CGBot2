@@ -10,7 +10,6 @@ import datetime
 import os
 import functools
 from collections import Counter
-from nltk.translate.bleu_score import sentence_bleu
 
 tf.enable_eager_execution()
 
