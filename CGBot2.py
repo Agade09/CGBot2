@@ -120,7 +120,7 @@ def Log_Message(msg):
       print(msg)
 
 class ChannelBot(ClientXMPP):
-    def __init__(self, jid, password,nick,rooms,MUC_name):
+    def __init__(self, jid, password,nick,rooms,MUC_name,Ignored):
       ClientXMPP.__init__(self, jid, password)
       self.nickname=nick
       self.room_names=rooms
@@ -129,6 +129,7 @@ class ChannelBot(ClientXMPP):
       self.model = {}
       self.char2idx={}
       self.idx2char={}
+      self.Ignored=Ignored
       for room_name in self.room_names:
         vocab_filepath = checkpoint_dir+'/vocab_'+room_name+'.npy'
         if os.path.isfile(vocab_filepath):
@@ -189,7 +190,7 @@ class ChannelBot(ClientXMPP):
       print(msg.get_mucnick()+':'+msg['body'])
       Log_Message(msg)
       Feed_Model(self.model[room_name],msg.get_mucnick()+':'+msg['body']+'\n',self.char2idx[room_name])
-      if msg.get_mucnick()!=self.nickname and self.nickname.lower() in msg['body'].lower():
+      if msg.get_mucnick()!=self.nickname and (self.nickname.lower() in msg['body'].lower()) and (not msg.get_mucnick() in self.Ignored):
         print("Saw my nickname")
         reply=self.make_message(mto=msg['from'].bare,mbody=generate_response(self.model[room_name],self.nickname+':',self.idx2char[room_name],self.char2idx[room_name]),mtype='groupchat')
         reply['id']=room_name+"_"+self.nickname+"@"+self.MUC+"/"+datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')+"_"+str(random.random())
@@ -302,11 +303,13 @@ MUC = config_file.readline().split()[0]
 Nickname = config_file.readline().split()[0]
 Channel_line=config_file.readline()
 Channels = Channel_line[:Channel_line.find("//")].split()
+Ignored_line=config_file.readline()
+Ignored = Ignored_line[:Ignored_line.find("//")].split()
 config_file.close()
 
 if Train:
   Train_Bot(Channels[0],MUC)
 else:
-  Bot = ChannelBot(CG_ID+'@'+Chat_host,CG_password,Nickname,Channels,MUC)
+  Bot = ChannelBot(CG_ID+'@'+Chat_host,CG_password,Nickname,Channels,MUC,Ignored)
   Bot.connect()
   Bot.process()
