@@ -1,7 +1,8 @@
-1234567												    //ID of the codingame.com account taken from the FAQ page
-password  												//Password of the codingame.com account
-chat.codingame.com 										//Host
-5222													//Port
-conference.codingame.com 								//MUC
-NeumaNN													//Nickname of the bot
-fr world ru                                             //Rooms to join
+1234567												            //ID of the codingame.com account taken from the FAQ page
+password  												        //Password of the codingame.com account
+chat.codingame.com 										        //Host
+5222													        //Port
+conference.codingame.com 								        //MUC
+NeumaNN													        //Nickname of the bot
+fr world ru                                                     //Rooms to join
+Automaton2000 AgadeBot Agade_fr Neumam NeumaNN AgadE Agadde     //Users to ignore
