@@ -159,7 +159,11 @@ class ChannelBot(ClientXMPP):
             text=open(logs_dir+'/'+file).read()+text
             if len(text)>=Initialisation_Length:
               break
+        text = text[len(text)-2*Initialisation_Length:]
+        text = text[text.find('\n')+1:]
+        text = Filter_Logs(text)
         text = text[len(text)-Initialisation_Length:]
+        text = text[text.find('\n')+1:]
         Feed_Model(self.model[room_name],text,self.char2idx[room_name])#Give the model some state
       if Test:
         first_room=self.room_names[0]
