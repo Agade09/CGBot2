@@ -26,9 +26,9 @@ Test=False
 Initialisation_Length=1000
 Vocab_Limit=256
 # Low temperatures results in more predictable text. Higher temperatures results in more surprising text. Experiment to find the best setting.
-Max_Temperature = 0.5
+Max_Temperature = 1.0
 Min_Temperature = 0.25
-Temperature_Char_Annealing = 5
+Temperature_Char_Annealing = 10
 checkpoint_dir = './training_checkpoints' # Directory where the checkpoints will be saved
 logs_dir = './Logs'
 config_filename = 'Config.txt'
