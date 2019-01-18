@@ -204,7 +204,7 @@ class ChannelBot(ClientXMPP):
         reply['id']=room_name+"_"+self.nickname+"@"+self.MUC+"/"+datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')+"_"+str(random.random())
         reply.send()
 
-    def Crash(self):
+    def crash(self):
       exit()
 
 def Train_Bot(channel_name,MUC):
