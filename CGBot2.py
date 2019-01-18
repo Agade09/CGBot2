@@ -25,7 +25,10 @@ Log_Messages=True
 Test=False
 Initialisation_Length=1000
 Vocab_Limit=256
-Temperature = 0.25 # Low temperatures results in more predictable text. Higher temperatures results in more surprising text. Experiment to find the best setting.
+# Low temperatures results in more predictable text. Higher temperatures results in more surprising text. Experiment to find the best setting.
+Max_Temperature = 0.5
+Min_Temperature = 0.25
+Temperature_Char_Annealing = 5
 checkpoint_dir = './training_checkpoints' # Directory where the checkpoints will be saved
 logs_dir = './Logs'
 config_filename = 'Config.txt'
@@ -54,15 +57,12 @@ def build_model(vocab_size, embedding_dim, batch_size):
 def loss(labels, logits):
   return tf.keras.backend.sparse_categorical_crossentropy(labels,logits,from_logits=True)
 
-def Predictions_To_Id(predictions):
+def Predictions_To_Id(predictions,Temperature):
   predictions = tf.squeeze(predictions, 0) # remove the batch dimension
   # using a multinomial distribution to predict the word returned by the model
   predictions = predictions / Temperature
   predicted_id = tf.multinomial(predictions, num_samples=1)[-1,0].numpy()
   return predicted_id
-
-def Predictions_To_Char(predictions,idx2char):
-  return idx2char[Predictions_To_Id(predictions)]
 
 def String_To_Int_Vector(string,char2idx):
   return np.array([(char2idx[c] if (c in char2idx) else len(char2idx)-1) for c in string],dtype=np.uint8)
@@ -73,6 +73,9 @@ def Feed_Model(model,message,char2idx):
   predictions = model(msg_input)
   return predictions
 
+def Current_Temperature(idx):
+  return Max_Temperature+(Min_Temperature-Max_Temperature)*min(1,idx/Temperature_Char_Annealing)
+
 def generate_response(model,start_string,idx2char,char2idx): # Evaluation step (generating text using the learned model)
   start = time.time()
   num_generate = 100 # Max Number of characters to generate
@@ -81,7 +84,7 @@ def generate_response(model,start_string,idx2char,char2idx): # Evaluation step (
   text_generated = []
   for i in range(num_generate):
       predictions = model(input_eval)
-      predicted_id = Predictions_To_Id(predictions)
+      predicted_id = Predictions_To_Id(predictions,Current_Temperature(i))
       
       # We pass the predicted word as the next input to the model along with the previous hidden state
       input_eval = tf.expand_dims([predicted_id], 0)
