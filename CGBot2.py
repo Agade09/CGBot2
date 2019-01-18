@@ -175,6 +175,7 @@ class ChannelBot(ClientXMPP):
       self.add_event_handler("session_start", self.session_start)
       self.add_event_handler("message", self.message)
       self.add_event_handler("groupchat_message", self.muc_message)
+      self.add_event_handler("session_end",self.crash)
 
     def session_start(self, event):
       self.send_presence()
@@ -202,6 +203,9 @@ class ChannelBot(ClientXMPP):
         reply=self.make_message(mto=msg['from'].bare,mbody=generate_response(self.model[room_name],self.nickname+':',self.idx2char[room_name],self.char2idx[room_name]),mtype='groupchat')
         reply['id']=room_name+"_"+self.nickname+"@"+self.MUC+"/"+datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')+"_"+str(random.random())
         reply.send()
+
+    def Crash(self):
+      exit()
 
 def Train_Bot(channel_name,MUC):
   text=""
