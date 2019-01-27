@@ -205,7 +205,7 @@ class ChannelBot(ClientXMPP):
         reply.send()
 
     def crash(self):
-      exit()
+      sys.exit()
 
 def Train_Bot(channel_name,MUC):
   text=""
