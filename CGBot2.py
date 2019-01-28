@@ -176,6 +176,12 @@ class ChannelBot(ClientXMPP):
       self.add_event_handler("message", self.message)
       self.add_event_handler("groupchat_message", self.muc_message)
       self.add_event_handler("session_end",self.crash)
+      self.add_event_handler("socket_error",self.crash)
+      self.add_event_handler("disconnected",self.crash)
+      self.add_event_handler("stream_error",self.crash)
+      self.add_event_handler("killed",self.crash)
+      self.add_event_handler("connection_failed",self.crash)
+      self.add_event_handler("close",self.crash)
 
     def session_start(self, event):
       self.send_presence()
@@ -205,6 +211,7 @@ class ChannelBot(ClientXMPP):
         reply.send()
 
     def crash(self):
+      print("crashed")
       sys.exit()
 
 def Train_Bot(channel_name,MUC):
