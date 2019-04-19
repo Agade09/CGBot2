@@ -13,4 +13,6 @@ training_checkpoints/*
 !training_checkpoints/vocab_world.npy
 !training_checkpoints/weights_ru.h5
 !training_checkpoints/vocab_ru.npy
+!training_checkpoints/weights_de.h5
+!training_checkpoints/vocab_de.npy
 !.gitattributes
