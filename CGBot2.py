@@ -7,13 +7,14 @@ import re as regex
 from slixmpp import ClientXMPP
 import datetime
 import os
+import sys
 import functools
 from collections import Counter
 import tensorflow as tf
 from tensorflow.contrib.opt import DecoupledWeightDecayExtension,NadamOptimizer
 
-seq_length = 1000 # The maximum length sentence we want for a single input in characters
-BATCH_SIZE = 128
+seq_length = 250 # The maximum length sentence we want for a single input in characters
+BATCH_SIZE = 512
 BUFFER_SIZE = 10000
 EPOCHS=100
 embedding_dim = 256 # The embedding dimension 
@@ -51,7 +52,7 @@ def build_model(vocab_size, embedding_dim, batch_size):
     rnn = functools.partial(tf.keras.layers.GRU,reset_after=True,recurrent_activation='sigmoid')
   model = tf.keras.Sequential()
   model.add(tf.keras.layers.Embedding(vocab_size,embedding_dim,batch_input_shape=[batch_size,None]))
-  model.add(rnn(rnn_units,return_sequences=True,recurrent_initializer='glorot_uniform',stateful=False))
+  model.add(rnn(rnn_units,return_sequences=True,recurrent_initializer='glorot_uniform',stateful=True))
   model.add(tf.keras.layers.Dense(vocab_size))
   return model
 
@@ -243,47 +244,60 @@ def Train_Bot(channel_name,MUC):
   char2idx = {u:i for i, u in enumerate(vocab)}
   idx2char = np.array(vocab)
 
+  Total_Text_Length = len(text)
   text=text.split('\n')
-  def Pad(string):
-    if len(string)>seq_length:
-      return string[:seq_length]
+  def Pad(string,desired_length):
+    if len(string)>desired_length:
+      return string[:desired_length]
     else:
-      return string.ljust(seq_length) #pad with spaces
-  def Sample(text_by_line):
+      return string.ljust(desired_length) #pad with spaces
+  def Sample(text_by_line,desired_length=sys.maxsize,end_char='\n',target_sequences=sys.maxsize):
     text_samples=[]
     i=0
-    while i<len(text_by_line):
+    while i<len(text_by_line) and len(text_samples)<target_sequences:
       #print(str(i)+"\\"+str(len(text_by_line)))
       sample=""
-      while i<len(text_by_line) and len(sample)+len(text_by_line[i])+1<=seq_length: #How to deal with a really long line?
-        sample+=text_by_line[i]+'\n'
-        i+=1
-      text_samples.append(Pad(sample))
-    return text_samples
-  text = Sample(text)
-  np.random.shuffle(text)
-  text_as_int = np.array([String_To_Int_Vector(s,char2idx) for s in text])
+      while i<len(text_by_line) and len(sample)+len(text_by_line[i])+1<=desired_length: #How to deal with a really long line?
+        sample+=text_by_line[i]+end_char
+        i+=1;
+      text_samples.append(Pad(sample,desired_length) if desired_length!=sys.maxsize else sample)
+    return text_samples, i
+  def Text_Length_To_Sequence_Lenth(text_length):
+    return int(np.ceil(text_length/BATCH_SIZE))
+  training_length = int(np.round(Total_Text_Length*Training_Proportion))
+  validation_length = Total_Text_Length-training_length
+  training_sequence_length = Text_Length_To_Sequence_Lenth(training_length)
+  validation_sequence_length = Text_Length_To_Sequence_Lenth(validation_length)
+  print("Splitting the",Total_Text_Length,"characters of training text into",BATCH_SIZE,"sequences of",training_sequence_length,"characters each")
+  training_text, stop_index = Sample(text,desired_length=training_sequence_length,target_sequences=BATCH_SIZE)
+  validation_text, _ = Sample(text[stop_index:],desired_length=validation_sequence_length,target_sequences=BATCH_SIZE)
+  training_text = [text for text,_ in [Sample(sequence,desired_length=seq_length,end_char='') for sequence in training_text]]
+  validation_text = [text for text,_ in [Sample(sequence,desired_length=seq_length,end_char='') for sequence in validation_text]]
+  #print(len(training_text))
+  #print(len(training_text[0]))
+  #print(len(training_text[0][0]))
+  training_text = [seq[i] for i in range(len(training_text[0])) for seq in training_text] #[['a','b'],['1','2']] -> ['a', '1', 'b', '2']
+  #print(len(training_text))
+  #print(len(training_text[0]))
+  #print(len(training_text[0][0]))
+  validation_text = [seq[i] for i in range(len(validation_text[0])) for seq in validation_text] #[['a','b'],['1','2']] -> ['a', '1', 'b', '2']
+  training_text_as_int = np.array([String_To_Int_Vector(s,char2idx) for s in training_text])
+  validation_text_as_int = np.array([String_To_Int_Vector(s,char2idx) for s in validation_text])
   #text_as_int = [[text_as_int[i],text_as_int[i+1]] for i in range(len(text_as_int)-1)]
-  #print(text_as_int)
-  training_cutoff=round(len(text_as_int)*Training_Proportion)
-  train_text = text_as_int[:training_cutoff]
-  #print(train_text)
-  validation_text = text_as_int[training_cutoff:]
-  print("Training for channel",channel_name,"from",len(train_text),"samples and validating on",len(validation_text),"samples")
+  print("Training for channel",channel_name,"from",len(training_text_as_int),"samples and validating on",len(validation_text_as_int),"samples")
 
   # Create training examples / targets
-  dataset = tf.data.Dataset.from_tensor_slices(train_text)
-  dataset = dataset.shuffle(BUFFER_SIZE)
+  dataset = tf.data.Dataset.from_tensor_slices(training_text_as_int)
   dataset = dataset.repeat()
   dataset = dataset.map(map_func=split_input_target)
   dataset = dataset.batch(batch_size=BATCH_SIZE,drop_remainder=True)
   #dataset = dataset.prefetch(tf.contrib.data.AUTOTUNE)
 
-  validation_dataset = tf.data.Dataset.from_tensor_slices(validation_text)
+  validation_dataset = tf.data.Dataset.from_tensor_slices(validation_text_as_int)
   #validation_dataset = validation_dataset.batch(seq_length+1,drop_remainder=True)
   validation_dataset = validation_dataset.map(map_func=split_input_target)
   validation_dataset = validation_dataset.batch(batch_size=BATCH_SIZE,drop_remainder=True)
-  validation_dataset = validation_dataset.repeat()
+  #validation_dataset = validation_dataset.repeat()
   #validation_dataset = validation_dataset.prefetch(tf.contrib.data.AUTOTUNE)
 
   model = build_model(vocab_size=len(vocab),embedding_dim=embedding_dim,batch_size=BATCH_SIZE)
@@ -298,8 +312,8 @@ def Train_Bot(channel_name,MUC):
   checkpoint_prefix = checkpoint_dir+"/weights_"+channel_name+".h5"# Name of the checkpoint files
   checkpoint_callback=tf.keras.callbacks.ModelCheckpoint(filepath=checkpoint_prefix,save_weights_only=True,save_best_only=True,monitor='val_loss')
 
-  steps_per_training_epoch = len(train_text)//BATCH_SIZE
-  steps_per_validation_epoch = len(validation_text)//BATCH_SIZE
+  steps_per_training_epoch = np.ceil(len(training_text_as_int)/BATCH_SIZE)
+  steps_per_validation_epoch = np.ceil(len(validation_text_as_int)/BATCH_SIZE)
   training_history = model.fit(dataset, epochs=EPOCHS, steps_per_epoch=steps_per_training_epoch, callbacks=[checkpoint_callback], validation_steps=steps_per_validation_epoch,validation_data=validation_dataset)
 
   # summarize history for loss
