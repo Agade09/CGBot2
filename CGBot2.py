@@ -51,7 +51,7 @@ def build_model(vocab_size, embedding_dim, batch_size):
     rnn = functools.partial(tf.keras.layers.GRU,reset_after=True,recurrent_activation='sigmoid')
   model = tf.keras.Sequential()
   model.add(tf.keras.layers.Embedding(vocab_size,embedding_dim,batch_input_shape=[batch_size,None]))
-  model.add(rnn(rnn_units,return_sequences=True,recurrent_initializer='glorot_uniform',stateful=True))
+  model.add(rnn(rnn_units,return_sequences=True,recurrent_initializer='glorot_uniform',stateful=False))
   model.add(tf.keras.layers.Dense(vocab_size))
   return model
 
