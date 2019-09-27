@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-import tensorflow as tf
 import numpy as np
 import os
 import time
@@ -10,10 +9,11 @@ import datetime
 import os
 import functools
 from collections import Counter
-import random
+import tensorflow as tf
+from tensorflow.contrib.opt import DecoupledWeightDecayExtension,NadamOptimizer
 
 seq_length = 1000 # The maximum length sentence we want for a single input in characters
-BATCH_SIZE = 2
+BATCH_SIZE = 128
 BUFFER_SIZE = 10000
 EPOCHS=100
 embedding_dim = 256 # The embedding dimension 
@@ -25,6 +25,8 @@ Log_Messages=True
 Test=False
 Initialisation_Length=1000
 Vocab_Limit=256
+Learning_Rate=1e-3
+Weight_Decay=1e-5
 # Low temperatures results in more predictable text. Higher temperatures results in more surprising text. Experiment to find the best setting.
 Max_Temperature = 1.0
 Min_Temperature = 0.25
@@ -47,15 +49,18 @@ def build_model(vocab_size, embedding_dim, batch_size):
   else:
     os.environ["CUDA_VISIBLE_DEVICES"]="-1"
     rnn = functools.partial(tf.keras.layers.GRU,reset_after=True,recurrent_activation='sigmoid')
-  model = tf.keras.Sequential([
-    tf.keras.layers.Embedding(vocab_size,embedding_dim,batch_input_shape=[batch_size,None]),
-    rnn(rnn_units,return_sequences=True,recurrent_initializer='glorot_uniform',stateful=True),
-    tf.keras.layers.Dense(vocab_size)
-  ])
+  model = tf.keras.Sequential()
+  model.add(tf.keras.layers.Embedding(vocab_size,embedding_dim,batch_input_shape=[batch_size,None]))
+  model.add(rnn(rnn_units,return_sequences=True,recurrent_initializer='glorot_uniform',stateful=True))
+  model.add(tf.keras.layers.Dense(vocab_size))
   return model
 
 def loss(labels, logits):
   return tf.keras.backend.sparse_categorical_crossentropy(labels,logits,from_logits=True)
+
+class NadamWOptimizer(DecoupledWeightDecayExtension, NadamOptimizer):
+  def __init__(self, weight_decay, *args, **kwargs):
+    super(NadamWOptimizer, self).__init__(weight_decay, *args, **kwargs)
 
 def Predictions_To_Id(predictions,Temperature):
   predictions = tf.squeeze(predictions, 0) # remove the batch dimension
@@ -194,7 +199,7 @@ class ChannelBot(ClientXMPP):
       if msg['type'] in ('chat', 'normal'):
         first_room=self.room_names[0]
         reply=self.make_message(mto=msg['from'].bare,mbody=generate_response(self.model[first_room],self.nickname+':',self.idx2char[first_room],self.char2idx[first_room]))
-        reply['id']=first_room+"_"+self.nickname+"@"+self.MUC+"/"+datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')+"_"+str(random.random())
+        reply['id']=first_room+"_"+self.nickname+"@"+self.MUC+"/"+datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')+"_"+str(np.random.random())
         reply.send()
 
     def muc_message(self,msg):
@@ -207,7 +212,7 @@ class ChannelBot(ClientXMPP):
       if msg.get_mucnick()!=self.nickname and (self.nickname.lower() in msg['body'].lower()) and (not msg.get_mucnick() in self.Ignored):
         print("Saw my nickname")
         reply=self.make_message(mto=msg['from'].bare,mbody=generate_response(self.model[room_name],self.nickname+':',self.idx2char[room_name],self.char2idx[room_name]),mtype='groupchat')
-        reply['id']=room_name+"_"+self.nickname+"@"+self.MUC+"/"+datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')+"_"+str(random.random())
+        reply['id']=room_name+"_"+self.nickname+"@"+self.MUC+"/"+datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')+"_"+str(np.random.random())
         reply.send()
 
     def crash(self):
@@ -256,6 +261,7 @@ def Train_Bot(channel_name,MUC):
       text_samples.append(Pad(sample))
     return text_samples
   text = Sample(text)
+  np.random.shuffle(text)
   text_as_int = np.array([String_To_Int_Vector(s,char2idx) for s in text])
   #text_as_int = [[text_as_int[i],text_as_int[i+1]] for i in range(len(text_as_int)-1)]
   #print(text_as_int)
@@ -263,17 +269,20 @@ def Train_Bot(channel_name,MUC):
   train_text = text_as_int[:training_cutoff]
   #print(train_text)
   validation_text = text_as_int[training_cutoff:]
+  print("Training for channel",channel_name,"from",len(train_text),"samples and validating on",len(validation_text),"samples")
 
   # Create training examples / targets
   dataset = tf.data.Dataset.from_tensor_slices(train_text)
-  #dataset = dataset.batch(seq_length+1,drop_remainder=True)
-  dataset = dataset.apply(tf.data.experimental.shuffle_and_repeat(BUFFER_SIZE))
-  dataset = dataset.apply(tf.data.experimental.map_and_batch(batch_size=BATCH_SIZE,drop_remainder=True,map_func=split_input_target))
+  dataset = dataset.shuffle(BUFFER_SIZE)
+  dataset = dataset.repeat()
+  dataset = dataset.map(map_func=split_input_target)
+  dataset = dataset.batch(batch_size=BATCH_SIZE,drop_remainder=True)
   #dataset = dataset.prefetch(tf.contrib.data.AUTOTUNE)
 
   validation_dataset = tf.data.Dataset.from_tensor_slices(validation_text)
   #validation_dataset = validation_dataset.batch(seq_length+1,drop_remainder=True)
-  validation_dataset = validation_dataset.apply(tf.data.experimental.map_and_batch(batch_size=BATCH_SIZE,drop_remainder=True,map_func=split_input_target))
+  validation_dataset = validation_dataset.map(map_func=split_input_target)
+  validation_dataset = validation_dataset.batch(batch_size=BATCH_SIZE,drop_remainder=True)
   validation_dataset = validation_dataset.repeat()
   #validation_dataset = validation_dataset.prefetch(tf.contrib.data.AUTOTUNE)
 
@@ -285,7 +294,7 @@ def Train_Bot(channel_name,MUC):
   else:
     print("Training from random weights")
   model.summary()
-  model.compile(optimizer=tf.train.AdamOptimizer(),loss=loss)
+  model.compile(optimizer=NadamWOptimizer(learning_rate=Learning_Rate,weight_decay=Weight_Decay),loss=loss)
   checkpoint_prefix = checkpoint_dir+"/weights_"+channel_name+".h5"# Name of the checkpoint files
   checkpoint_callback=tf.keras.callbacks.ModelCheckpoint(filepath=checkpoint_prefix,save_weights_only=True,save_best_only=True,monitor='val_loss')
 
