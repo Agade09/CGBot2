@@ -18,10 +18,10 @@ BATCH_SIZE = 128
 BUFFER_SIZE = 10000
 EPOCHS=100
 embedding_dim = 256 # The embedding dimension
-Is_Stateful = True
+Is_Stateful = False
 RNN_Layers = 4
 rnn_units = 256 # Number of RNN units
-Training_Proportion = 0.80
+Training_Proportion = 0.95
 load_checkpoint = True
 Train = False
 Log_Messages=True
@@ -264,21 +264,34 @@ def Train_Bot(channel_name,MUC):
         i+=1;
       text_samples.append(Pad(sample,desired_length) if desired_length!=sys.maxsize else sample)
     return text_samples, i
+  def Make_Stateful_Inputs(text,Total_Text_Length):
+    training_length = int(np.round(Total_Text_Length*Training_Proportion))
+    validation_length = Total_Text_Length-training_length
+    training_sequence_length = Text_Length_To_Sequence_Lenth(training_length)
+    validation_sequence_length = Text_Length_To_Sequence_Lenth(validation_length)
+    print("Splitting the",training_length,"training characters of training text into",BATCH_SIZE,"sequences of",training_sequence_length,"characters each")
+    print("Splitting the",validation_length,"validation characters of training text into",BATCH_SIZE,"sequences of",validation_sequence_length,"characters each")
+    training_text, stop_index = Sample(text,desired_length=training_sequence_length,target_sequences=BATCH_SIZE)
+    validation_text, _ = Sample(text[stop_index:],desired_length=validation_sequence_length,target_sequences=BATCH_SIZE)
+    training_text = [text for text,_ in [Sample(sequence,desired_length=seq_length,end_char='') for sequence in training_text]]
+    validation_text = [text for text,_ in [Sample(sequence,desired_length=seq_length,end_char='') for sequence in validation_text]]
+    training_text = [seq[i] for i in range(len(training_text[0])) for seq in training_text] #[['a','b'],['1','2']] -> ['a', '1', 'b', '2']
+    print('Training text converted to',len(training_text),'excerpts of length',len(training_text[0]))
+    validation_text = [seq[i] for i in range(len(validation_text[0])) for seq in validation_text] #[['a','b'],['1','2']] -> ['a', '1', 'b', '2']
+    return training_text, validation_text
+  def Make_NonStateful_Inputs(text):
+    text, _ = Sample(text,desired_length=seq_length)
+    np.random.shuffle(text)
+    training_cutoff=round(len(text)*Training_Proportion)
+    return text[:training_cutoff], text[training_cutoff:]
+  def Make_Inputs(text,Total_Text_Length):
+    if Is_Stateful:
+      return Make_Stateful_Inputs(text,Total_Text_Length)
+    else:
+      return Make_NonStateful_Inputs(text)
   def Text_Length_To_Sequence_Lenth(text_length):
     return int(np.ceil(text_length/BATCH_SIZE))
-  training_length = int(np.round(Total_Text_Length*Training_Proportion))
-  validation_length = Total_Text_Length-training_length
-  training_sequence_length = Text_Length_To_Sequence_Lenth(training_length)
-  validation_sequence_length = Text_Length_To_Sequence_Lenth(validation_length)
-  print("Splitting the",training_length,"training characters of training text into",BATCH_SIZE,"sequences of",training_sequence_length,"characters each")
-  print("Splitting the",validation_length,"validation characters of training text into",BATCH_SIZE,"sequences of",validation_sequence_length,"characters each")
-  training_text, stop_index = Sample(text,desired_length=training_sequence_length,target_sequences=BATCH_SIZE)
-  validation_text, _ = Sample(text[stop_index:],desired_length=validation_sequence_length,target_sequences=BATCH_SIZE)
-  training_text = [text for text,_ in [Sample(sequence,desired_length=seq_length,end_char='') for sequence in training_text]]
-  validation_text = [text for text,_ in [Sample(sequence,desired_length=seq_length,end_char='') for sequence in validation_text]]
-  training_text = [seq[i] for i in range(len(training_text[0])) for seq in training_text] #[['a','b'],['1','2']] -> ['a', '1', 'b', '2']
-  print('Training text converted to',len(training_text),'excerpts of length',len(training_text[0]))
-  validation_text = [seq[i] for i in range(len(validation_text[0])) for seq in validation_text] #[['a','b'],['1','2']] -> ['a', '1', 'b', '2']
+  training_text, validation_text = Make_Inputs(text,Total_Text_Length)
   training_text_as_int = np.array([String_To_Int_Vector(s,char2idx) for s in training_text])
   validation_text_as_int = np.array([String_To_Int_Vector(s,char2idx) for s in validation_text])
   print("Training for channel",channel_name,"from",len(training_text_as_int),"samples and validating on",len(validation_text_as_int),"samples")
@@ -317,10 +330,11 @@ def Train_Bot(channel_name,MUC):
         self.model.reset_states()
     Callbacks_List.append(LSTM_Reset_Callback())
 
-  assert len(training_text_as_int)%BATCH_SIZE==0,"len(training_text_as_int) not divisible by Batch Size"
-  assert len(validation_text_as_int)%BATCH_SIZE==0,"len(validation_text_as_int) not divisible by Batch Size"
-  steps_per_training_epoch = len(training_text_as_int)//BATCH_SIZE
-  steps_per_validation_epoch = len(validation_text_as_int)//BATCH_SIZE
+  if Is_Stateful:
+    assert len(training_text_as_int)%BATCH_SIZE==0,"len(training_text_as_int) not divisible by Batch Size"
+    assert len(validation_text_as_int)%BATCH_SIZE==0,"len(validation_text_as_int) not divisible by Batch Size"
+  steps_per_training_epoch = int(np.ceil(len(training_text_as_int)/BATCH_SIZE))
+  steps_per_validation_epoch = int(np.ceil(len(validation_text_as_int)/BATCH_SIZE))
   training_history = model.fit(dataset,epochs=EPOCHS,steps_per_epoch=steps_per_training_epoch,callbacks=Callbacks_List,validation_steps=steps_per_validation_epoch,validation_data=validation_dataset)
 
   # summarize history for loss
