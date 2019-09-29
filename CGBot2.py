@@ -19,8 +19,8 @@ BUFFER_SIZE = 10000
 EPOCHS=100
 embedding_dim = 256 # The embedding dimension
 Is_Stateful = False
-RNN_Layers = 4
-rnn_units = 256 # Number of RNN units
+RNN_Layers = 1
+rnn_units = 1024 # Number of RNN units
 Training_Proportion = 0.95
 load_checkpoint = True
 Train = False
@@ -29,8 +29,8 @@ Test=False
 Initialisation_Length=1000
 Vocab_Limit=256
 Learning_Rate=1e-3
-Weight_Decay=0#1e-4
-Dropout_Rate=0.25
+Weight_Decay=1e-4
+Dropout_Rate=0
 # Low temperatures results in more predictable text. Higher temperatures results in more surprising text.
 Max_Temperature = 1.0
 Min_Temperature = 0.25
@@ -57,9 +57,9 @@ def build_model(vocab_size, embedding_dim, batch_size):
   model.add(tf.keras.layers.Embedding(vocab_size,embedding_dim,batch_input_shape=[batch_size,None]))
   model.add(tf.keras.layers.BatchNormalization())
   for _ in range(RNN_Layers):
-    model.add(rnn(rnn_units,return_sequences=True,recurrent_initializer='glorot_uniform',stateful=Is_Stateful))
+    model.add(rnn(rnn_units,return_sequences=True,recurrent_initializer='glorot_uniform',stateful=Is_Stateful if Train else True))
     model.add(tf.keras.layers.BatchNormalization())
-    model.add(tf.keras.layers.Dropout(Dropout_Rate))
+    #model.add(tf.keras.layers.Dropout(Dropout_Rate))
   model.add(tf.keras.layers.Dense(vocab_size))
   return model
 
