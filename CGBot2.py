@@ -298,6 +298,8 @@ def Train_Bot(channel_name,MUC):
 
   # Create training examples / targets
   dataset = tf.data.Dataset.from_tensor_slices(training_text_as_int)
+  if not Is_Stateful:
+    dataset = dataset.shuffle(BUFFER_SIZE)
   dataset = dataset.repeat()
   dataset = dataset.map(map_func=split_input_target)
   dataset = dataset.batch(batch_size=BATCH_SIZE,drop_remainder=True)
