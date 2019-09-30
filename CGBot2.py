@@ -281,7 +281,9 @@ def Train_Bot(channel_name,MUC):
     return training_text, validation_text
   def Make_NonStateful_Inputs(text):
     text, _ = Sample(text,desired_length=seq_length)
+    np.random.seed(0)
     np.random.shuffle(text)
+    np.random.seed()
     training_cutoff=round(len(text)*Training_Proportion)
     return text[:training_cutoff], text[training_cutoff:]
   def Make_Inputs(text,Total_Text_Length):
