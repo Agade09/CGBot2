@@ -16,21 +16,22 @@ from tensorflow.contrib.opt import DecoupledWeightDecayExtension,NadamOptimizer
 seq_length = 1000
 BATCH_SIZE = 128
 BUFFER_SIZE = 10000
-EPOCHS=100
-embedding_dim = 256 # The embedding dimension
+EPOCHS=1000
+embedding_dim = 64 # The embedding dimension
 Is_Stateful = False
 RNN_Layers = 1
 rnn_units = 1024 # Number of RNN units
 Training_Proportion = 0.95
 load_checkpoint = True
 Train = False
-Log_Messages=True
+Log_Messages=False
 Test=False
 Initialisation_Length=1000
 Vocab_Limit=256
 Learning_Rate=1e-3
-Weight_Decay=1e-4
-Dropout_Rate=0
+Weight_Decay=2e-4
+Dropout_Rate=0.05
+Early_Stopping_Patience=10 #"Number of epochs with no improvement after which training will be stopped"
 # Low temperatures results in more predictable text. Higher temperatures results in more surprising text.
 Max_Temperature = 1.0
 Min_Temperature = 0.25
@@ -38,6 +39,7 @@ Temperature_Char_Annealing = 10
 checkpoint_dir = './training_checkpoints'
 logs_dir = './Logs'
 config_filename = 'Config.txt'
+Outputs_Dir = './Graphs'
 
 if not Train:
   tf.enable_eager_execution()
@@ -54,12 +56,16 @@ def build_model(vocab_size, embedding_dim, batch_size):
     os.environ["CUDA_VISIBLE_DEVICES"]="-1"
     rnn = functools.partial(tf.keras.layers.GRU,reset_after=True,recurrent_activation='sigmoid')
   model = tf.keras.Sequential()
-  model.add(tf.keras.layers.Embedding(vocab_size,embedding_dim,batch_input_shape=[batch_size,None]))
-  model.add(tf.keras.layers.BatchNormalization())
-  for _ in range(RNN_Layers):
+  model.add(tf.keras.layers.Embedding(vocab_size,embedding_dim,batch_input_shape=[batch_size,seq_length-1]))
+  #model.add(tf.keras.layers.Lambda(lambda x:tf.contrib.layers.group_norm(x,reduction_axes=(-3,))[0]))
+  model.add(tf.keras.layers.LayerNormalization())
+  #model.add(tf.keras.layers.BatchNormalization())
+  #model.add(tf.keras.layers.Dropout(Dropout_Rate))
+  for i in range(RNN_Layers):
     model.add(rnn(rnn_units,return_sequences=True,recurrent_initializer='glorot_uniform',stateful=Is_Stateful if Train else True))
-    model.add(tf.keras.layers.BatchNormalization())
-    #model.add(tf.keras.layers.Dropout(Dropout_Rate))
+    #model.add(tf.keras.layers.BatchNormalization())
+    model.add(tf.keras.layers.LayerNormalization())
+    model.add(tf.keras.layers.Dropout(Dropout_Rate))
   model.add(tf.keras.layers.Dense(vocab_size))
   return model
 
@@ -228,6 +234,7 @@ class ChannelBot(ClientXMPP):
       sys.exit()
 
 def Train_Bot(channel_name,MUC):
+  training_start = time.time()
   text=""
   logfile = regex.compile(regex.escape(channel_name)+r'@'+regex.escape(MUC)+r'-\d\d\d\d-\d\d-\d\d\.log')
   for file in sorted(os.listdir(logs_dir)):
@@ -294,6 +301,7 @@ def Train_Bot(channel_name,MUC):
   def Text_Length_To_Sequence_Lenth(text_length):
     return int(np.ceil(text_length/BATCH_SIZE))
   training_text, validation_text = Make_Inputs(text,Total_Text_Length)
+  print(len(training_text),len(validation_text))
   training_text_as_int = np.array([String_To_Int_Vector(s,char2idx) for s in training_text])
   validation_text_as_int = np.array([String_To_Int_Vector(s,char2idx) for s in validation_text])
   print("Training for channel",channel_name,"from",len(training_text_as_int),"samples and validating on",len(validation_text_as_int),"samples")
@@ -308,10 +316,10 @@ def Train_Bot(channel_name,MUC):
   #dataset = dataset.prefetch(tf.contrib.data.AUTOTUNE)
 
   validation_dataset = tf.data.Dataset.from_tensor_slices(validation_text_as_int)
+  validation_dataset = validation_dataset.repeat()
   #validation_dataset = validation_dataset.batch(seq_length+1,drop_remainder=True)
   validation_dataset = validation_dataset.map(map_func=split_input_target)
   validation_dataset = validation_dataset.batch(batch_size=BATCH_SIZE,drop_remainder=True)
-  validation_dataset = validation_dataset.repeat()
   #validation_dataset = validation_dataset.prefetch(tf.contrib.data.AUTOTUNE)
 
   model = build_model(vocab_size=len(vocab),embedding_dim=embedding_dim,batch_size=BATCH_SIZE)
@@ -333,6 +341,8 @@ def Train_Bot(channel_name,MUC):
       def on_epoch_begin(self, batch,logs=None):
         self.model.reset_states()
     Callbacks_List.append(LSTM_Reset_Callback())
+  Callbacks_List.append(tf.keras.callbacks.EarlyStopping(patience=Early_Stopping_Patience))
+  Callbacks_List.append(tf.keras.callbacks.CSVLogger(Outputs_Dir+'/training_logs_'+channel_name+'.csv', append=False, separator=';'))
 
   if Is_Stateful:
     assert len(training_text_as_int)%BATCH_SIZE==0,"len(training_text_as_int) not divisible by Batch Size"
@@ -342,14 +352,17 @@ def Train_Bot(channel_name,MUC):
   training_history = model.fit(dataset,epochs=EPOCHS,steps_per_epoch=steps_per_training_epoch,callbacks=Callbacks_List,validation_steps=steps_per_validation_epoch,validation_data=validation_dataset)
 
   # summarize history for loss
+  plt.yscale('log')
   plt.plot(training_history.history['loss'])
   plt.plot(training_history.history['val_loss'])
   plt.title('model loss')
   plt.ylabel('loss')
   plt.xlabel('epoch')
   plt.legend(['train', 'val'], loc='upper left')
-  plt.savefig('loss.png')
+  plt.savefig(Outputs_Dir+'/loss_'+channel_name+'.png')
   plt.gcf().clear()
+
+  print("Took",time.time()-training_start,"s to train on channel",channel_name,"'s logs")
 
 def Test_Bot(model,idx2char,char2idx):
   Phrases = ["Agade:Salut tout le monde","Agade:J'ai un probleme sur temperatures"]
@@ -374,7 +387,8 @@ Ignored = Ignored_line[:Ignored_line.find("//")].split()
 config_file.close()
 
 if Train:
-  Train_Bot(Channels[0],MUC)
+  for channel in Channels:
+    Train_Bot(channel,MUC)
 else:
   Bot = ChannelBot(CG_ID+'@'+Chat_host,CG_password,Nickname,Channels,MUC,Ignored)
   Bot.connect()
