@@ -56,7 +56,8 @@ def build_model(vocab_size, embedding_dim, batch_size):
     os.environ["CUDA_VISIBLE_DEVICES"]="-1"
     rnn = functools.partial(tf.keras.layers.GRU,reset_after=True,recurrent_activation='sigmoid')
   model = tf.keras.Sequential()
-  model.add(tf.keras.layers.Embedding(vocab_size,embedding_dim,batch_input_shape=[batch_size,seq_length-1]))
+  #model.add(tf.keras.layers.Embedding(vocab_size,embedding_dim,batch_input_shape=[batch_size,seq_length-1]))
+  model.add(tf.keras.layers.Embedding(Vocab_Limit,embedding_dim,batch_input_shape=[batch_size,seq_length-1]))#Wasteful to use Vocab_Limit but aids transfer learning from other channels
   #model.add(tf.keras.layers.Lambda(lambda x:tf.contrib.layers.group_norm(x,reduction_axes=(-3,))[0]))
   model.add(tf.keras.layers.LayerNormalization())
   #model.add(tf.keras.layers.BatchNormalization())
@@ -66,7 +67,8 @@ def build_model(vocab_size, embedding_dim, batch_size):
     #model.add(tf.keras.layers.BatchNormalization())
     model.add(tf.keras.layers.LayerNormalization())
     model.add(tf.keras.layers.Dropout(Dropout_Rate))
-  model.add(tf.keras.layers.Dense(vocab_size))
+  #model.add(tf.keras.layers.Dense(vocab_size))
+  model.add(tf.keras.layers.Dense(Vocab_Limit))#Wasteful to use Vocab_Limit but aids transfer learning from other channels
   return model
 
 def loss(labels, logits):
@@ -233,7 +235,7 @@ class ChannelBot(ClientXMPP):
       print("crashed")
       sys.exit()
 
-def Train_Bot(channel_name,MUC):
+def Train_Bot(channel_name,MUC,transfer_learn_channel):
   training_start = time.time()
   text=""
   logfile = regex.compile(regex.escape(channel_name)+r'@'+regex.escape(MUC)+r'-\d\d\d\d-\d\d-\d\d\.log')
@@ -324,9 +326,16 @@ def Train_Bot(channel_name,MUC):
 
   model = build_model(vocab_size=len(vocab),embedding_dim=embedding_dim,batch_size=BATCH_SIZE)
   checkpoint_file = checkpoint_dir+"/weights_"+channel_name+".h5"
+  transfer_learn_weights_file = checkpoint_dir+"/weights_"+transfer_learn_channel+".h5"
   if load_checkpoint and os.path.isfile(checkpoint_file):
     model.load_weights(checkpoint_file)
     print("Restarting training from previous checkpoint")
+  elif transfer_learn_channel!=channel_name and os.path.isfile(transfer_learn_weights_file):
+    try:
+      model.load_weights(transfer_learn_weights_file)
+      print("Transfer learning from channel",transfer_learn_channel)
+    except:
+      print("Transfer learning from channel",transfer_learn_channel,"failed to load the weights")
   else:
     print("Training from random weights")
   model.summary()
@@ -388,7 +397,7 @@ config_file.close()
 
 if Train:
   for channel in Channels:
-    Train_Bot(channel,MUC)
+    Train_Bot(channel,MUC,Channels[0])
 else:
   Bot = ChannelBot(CG_ID+'@'+Chat_host,CG_password,Nickname,Channels,MUC,Ignored)
   Bot.connect()
