@@ -80,7 +80,7 @@ def Predictions_To_Id(predictions,Temperature):
   predictions = tf.squeeze(predictions, 0) # remove the batch dimension
   # using a multinomial distribution to predict the word returned by the model
   predictions = predictions / Temperature
-  predicted_id = tf.multinomial(predictions, num_samples=1)[-1,0].numpy()
+  predicted_id = tf.random.categorical(predictions, num_samples=1)[-1,0].numpy()
   return predicted_id
 
 def String_To_Int_Vector(string,char2idx):
