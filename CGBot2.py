@@ -34,7 +34,7 @@ Dropout_Rate=0.05
 Early_Stopping_Patience=10 #"Number of epochs with no improvement after which training will be stopped"
 # Low temperatures results in more predictable text. Higher temperatures results in more surprising text.
 Max_Temperature = 1.0
-Min_Temperature = 0.25
+Min_Temperature = 0.5
 Temperature_Char_Annealing = 10
 checkpoint_dir = './training_checkpoints'
 logs_dir = './Logs'
