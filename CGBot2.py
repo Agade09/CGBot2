@@ -12,9 +12,10 @@ import functools
 from collections import Counter
 import tensorflow as tf
 from tensorflow.contrib.opt import DecoupledWeightDecayExtension,NadamOptimizer
+import tensorflow.keras.backend as K
 
 seq_length = 1000
-BATCH_SIZE = 128
+BATCH_SIZE = 64
 BUFFER_SIZE = 10000
 EPOCHS=1000
 embedding_dim = 64 # The embedding dimension
@@ -302,6 +303,13 @@ def Train_Bot(channel_name,MUC,transfer_learn_channel):
       return Make_NonStateful_Inputs(text)
   def Text_Length_To_Sequence_Lenth(text_length):
     return int(np.ceil(text_length/BATCH_SIZE))
+  def Accuracy(y_true,y_pred):
+  	y_true = K.reshape(y_true,(BATCH_SIZE,seq_length-1))
+  	y_pred = K.argmax(y_pred,axis=-1)
+  	y_true = K.cast(y_true,tf.int64)
+  	match = K.equal(y_true,y_pred)
+  	match = K.cast(match,tf.float32)
+  	return K.mean(match)
   training_text, validation_text = Make_Inputs(text,Total_Text_Length)
   print(len(training_text),len(validation_text))
   training_text_as_int = np.array([String_To_Int_Vector(s,char2idx) for s in training_text])
@@ -339,10 +347,10 @@ def Train_Bot(channel_name,MUC,transfer_learn_channel):
   else:
     print("Training from random weights")
   model.summary()
-  model.compile(optimizer=NadamWOptimizer(learning_rate=Learning_Rate,weight_decay=Weight_Decay),loss=loss)
+  model.compile(optimizer=NadamWOptimizer(learning_rate=Learning_Rate,weight_decay=Weight_Decay),loss=loss,metrics=[Accuracy])
   Callbacks_List = []
   checkpoint_prefix = checkpoint_dir+"/weights_"+channel_name+".h5"# Name of the checkpoint files
-  Callbacks_List.append(tf.keras.callbacks.ModelCheckpoint(filepath=checkpoint_prefix,save_weights_only=True,save_best_only=True,monitor='val_loss'))
+  Callbacks_List.append(tf.keras.callbacks.ModelCheckpoint(filepath=checkpoint_prefix,save_weights_only=True,save_best_only=True,mode='max',monitor='Accuracy'))
   if Is_Stateful:
     class LSTM_Reset_Callback(tf.keras.callbacks.Callback):
       def on_test_begin(self, batch,logs=None):
@@ -350,7 +358,7 @@ def Train_Bot(channel_name,MUC,transfer_learn_channel):
       def on_epoch_begin(self, batch,logs=None):
         self.model.reset_states()
     Callbacks_List.append(LSTM_Reset_Callback())
-  Callbacks_List.append(tf.keras.callbacks.EarlyStopping(patience=Early_Stopping_Patience))
+  Callbacks_List.append(tf.keras.callbacks.EarlyStopping(patience=Early_Stopping_Patience,monitor='Accuracy',mode='max'))
   Callbacks_List.append(tf.keras.callbacks.CSVLogger(Outputs_Dir+'/training_logs_'+channel_name+'.csv', append=False, separator=';'))
 
   if Is_Stateful:
@@ -369,6 +377,15 @@ def Train_Bot(channel_name,MUC,transfer_learn_channel):
   plt.xlabel('epoch')
   plt.legend(['train', 'val'], loc='upper left')
   plt.savefig(Outputs_Dir+'/loss_'+channel_name+'.png')
+  plt.gcf().clear()
+
+  plt.plot(training_history.history['Accuracy'])
+  plt.plot(training_history.history['val_Accuracy'])
+  plt.title('model accuracy')
+  plt.ylabel('accuracy')
+  plt.xlabel('epoch')
+  plt.legend(['train', 'val'], loc='upper left')
+  plt.savefig(Outputs_Dir+'/accuracy_'+channel_name+'.png')
   plt.gcf().clear()
 
   print("Took",time.time()-training_start,"s to train on channel",channel_name,"'s logs")
