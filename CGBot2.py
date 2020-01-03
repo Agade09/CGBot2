@@ -194,8 +194,6 @@ class ChannelBot(ClientXMPP):
         init_text = Filter_Logs(init_text)
         init_text = init_text[len(init_text)-Initialisation_Length:]
         init_text = init_text[init_text.find('\n')+1:]
-        print("Init Text")
-        print(init_text)
         if len(init_text)>0:
           Feed_Model(self.model[room_name],init_text,self.char2idx[room_name])#Give the model some state
       if Test:
