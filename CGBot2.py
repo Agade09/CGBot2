@@ -11,7 +11,7 @@ import sys
 import functools
 from collections import Counter
 import tensorflow as tf
-from tensorflow.contrib.opt import DecoupledWeightDecayExtension,NadamOptimizer
+import tensorflow_addons as tfa
 import tensorflow.keras.backend as K
 
 seq_length = 1000
@@ -23,7 +23,7 @@ Is_Stateful = False
 RNN_Layers = 1
 rnn_units = 1024 # Number of RNN units
 Training_Proportion = 0.95
-load_checkpoint = True
+load_checkpoint = False
 Train = False
 Log_Messages=False
 Test=False
@@ -32,7 +32,7 @@ Vocab_Limit=256
 Learning_Rate=1e-3
 Weight_Decay=2e-4
 Dropout_Rate=0.05
-Early_Stopping_Patience=10 #"Number of epochs with no improvement after which training will be stopped"
+Early_Stopping_Patience=2 #"Number of epochs with no improvement after which training will be stopped"
 # Low temperatures results in more predictable text. Higher temperatures results in more surprising text.
 Max_Temperature = 1.0
 Min_Temperature = 0.5
@@ -43,7 +43,7 @@ config_filename = 'Config.txt'
 Outputs_Dir = './Graphs'
 
 if not Train:
-  tf.enable_eager_execution()
+  tf.compat.v1.enable_eager_execution()
 
 def split_input_target(chunk):
     input_text = chunk[:-1]
@@ -52,7 +52,7 @@ def split_input_target(chunk):
 
 def build_model(vocab_size, embedding_dim, batch_size):
   if Train:
-    rnn = tf.keras.layers.CuDNNGRU
+    rnn = tf.keras.layers.GRU
   else:
     os.environ["CUDA_VISIBLE_DEVICES"]="-1"
     rnn = functools.partial(tf.keras.layers.GRU,reset_after=True,recurrent_activation='sigmoid')
@@ -74,10 +74,6 @@ def build_model(vocab_size, embedding_dim, batch_size):
 
 def loss(labels, logits):
   return tf.keras.backend.sparse_categorical_crossentropy(labels,logits,from_logits=True)
-
-class NadamWOptimizer(DecoupledWeightDecayExtension, NadamOptimizer):
-  def __init__(self, weight_decay, *args, **kwargs):
-    super(NadamWOptimizer, self).__init__(weight_decay, *args, **kwargs)
 
 def Predictions_To_Id(predictions,Temperature):
   predictions = tf.squeeze(predictions, 0) # remove the batch dimension
@@ -353,7 +349,7 @@ def Train_Bot(channel_name,MUC,transfer_learn_channel):
   else:
     print("Training from random weights")
   model.summary()
-  model.compile(optimizer=NadamWOptimizer(learning_rate=Learning_Rate,weight_decay=Weight_Decay),loss=loss,metrics=[Accuracy])
+  model.compile(optimizer=tfa.optimizers.RectifiedAdam(learning_rate=Learning_Rate,weight_decay=Weight_Decay),loss=loss,metrics=[Accuracy])
   Callbacks_List = []
   checkpoint_prefix = checkpoint_dir+"/weights_"+channel_name+".h5"# Name of the checkpoint files
   Callbacks_List.append(tf.keras.callbacks.ModelCheckpoint(filepath=checkpoint_prefix,save_weights_only=True,save_best_only=True,mode='max',monitor='Accuracy'))
